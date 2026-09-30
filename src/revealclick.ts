@@ -5,6 +5,9 @@ import { sleep } from "./lib/utils";
 const USE_CURSOR_POINTER = true;
 const USE_CLICK_LISTENERS = true;
 
+// per-element click cap, 1 disables repeat clicking
+const MAX_CLICKS = 10;
+
 const LISTENER_EVENTS = ["click", "mousedown", "pointerdown"];
 
 // matched against the element's own name only, not surrounding text
@@ -40,7 +43,7 @@ export class RevealClick extends BackgroundBehavior {
 
   constructor(
     selector = "button, summary, [role=button], [role=tab]",
-    maxClicks = 10,
+    maxClicks = MAX_CLICKS,
   ) {
     super();
     this.selector = selector;
