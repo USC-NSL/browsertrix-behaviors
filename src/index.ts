@@ -2,6 +2,7 @@ import { AutoFetcher } from "./autofetcher";
 import { Autoplay } from "./autoplay";
 import { AutoScroll } from "./autoscroll";
 import { AutoClick } from "./autoclick";
+import { RevealClick } from "./revealclick";
 import {
   awaitLoad,
   sleep,
@@ -58,6 +59,7 @@ const DEFAULT_LINK_EXTRACT = "href";
 type BehaviorClass =
   | (typeof siteBehaviors)[number]
   | typeof AutoClick
+  | typeof RevealClick
   | typeof AutoScroll
   | typeof Autoplay
   | typeof AutoFetcher
@@ -143,10 +145,9 @@ export class BehaviorManager {
     }
 
     if (opts.autoclick) {
-      void behaviorLog("Using AutoClick");
-      this.behaviors.push(
-        new AutoClick(opts.clickSelector || DEFAULT_CLICK_SELECTOR),
-      );
+      // eval-only: run RevealClick in place of AutoClick
+      void behaviorLog("Using RevealClick");
+      this.behaviors.push(new RevealClick());
     }
 
     if (customBehaviors) {
