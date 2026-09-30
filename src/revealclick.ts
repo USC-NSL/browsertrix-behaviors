@@ -7,6 +7,15 @@ const USE_CLICK_LISTENERS = true;
 
 const LISTENER_EVENTS = ["click", "mousedown", "pointerdown"];
 
+// matched against the element's own name only, not surrounding text
+const UNSAFE_NAME =
+  /\b(buy|checkout|subscribe|unsubscribe|delete|post|submit|sign in|add to cart)\b/i;
+
+// navigation api is not in the typescript dom lib yet
+type NavigateEvent = Event & {
+  destination: { sameDocument: boolean; url: string };
+};
+
 const CLICK_EVENTS = [
   "pointerdown",
   "mousedown",
@@ -57,8 +66,23 @@ export class RevealClick extends BackgroundBehavior {
     }
   }
 
+  isSafe(elem: Element) {
+    if (elem.closest("form") || elem.matches("[type=submit]")) {
+      return false;
+    }
+    const labelIds = elem.getAttribute("aria-labelledby")?.split(/\s+/) || [];
+    const name = [
+      elem.getAttribute("aria-label"),
+      ...labelIds.map((id) => document.getElementById(id)?.textContent),
+      elem.getAttribute("title"),
+      (elem as HTMLInputElement).value,
+      elem.textContent,
+    ].join(" ");
+    return !UNSAFE_NAME.test(name);
+  }
+
   isCandidate(elem: Element) {
-    if (this.seenElem.has(elem) || !elem.isConnected) {
+    if (this.seenElem.has(elem) || !elem.isConnected || !this.isSafe(elem)) {
       return false;
     }
     // only same-document links, following others would unload the page
@@ -155,6 +179,19 @@ export class RevealClick extends BackgroundBehavior {
 
     window.addEventListener("beforeunload", beforeUnload);
 
+    // cancels cross-document navigation before unload, without a dialog
+    const navigate = (event: Event) => {
+      const { destination } = event as NavigateEvent;
+      if (!destination.sameDocument) {
+        this.debug("Blocked navigation to: " + destination.url);
+        event.preventDefault();
+      }
+    };
+    const navigation = (self as unknown as { navigation?: EventTarget })
+      .navigation;
+
+    navigation?.addEventListener("navigate", navigate);
+
     const observer = new PerformanceObserver((list) =>
       this.addResources(list.getEntries()),
     );
@@ -178,7 +215,8 @@ export class RevealClick extends BackgroundBehavior {
         (await this.processElem(elem, observer)) &&
         clicks < this.maxClicks &&
         elem.isConnected &&
-        elem.checkVisibility()
+        elem.checkVisibility() &&
+        this.isSafe(elem)
       ) {
         clicks++;
       }
@@ -187,6 +225,8 @@ export class RevealClick extends BackgroundBehavior {
     }
 
     observer.disconnect();
+
+    navigation?.removeEventListener("navigate", navigate);
 
     window.removeEventListener("beforeunload", beforeUnload);
 
