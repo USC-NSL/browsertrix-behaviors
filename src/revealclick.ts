@@ -130,6 +130,21 @@ export class RevealClick extends BackgroundBehavior {
     return found;
   }
 
+  // cursor is inherited, only take the outermost pointer element
+  isPointer(elem: Element) {
+    return (
+      getComputedStyle(elem).cursor === "pointer" &&
+      !(
+        elem.parentElement &&
+        getComputedStyle(elem.parentElement).cursor === "pointer"
+      )
+    );
+  }
+
+  hasListener(elem: Element) {
+    return this._listenerElem.has(elem) || !!(elem as HTMLElement).onclick;
+  }
+
   nextElem(): Element | null {
     try {
       for (const elem of document.querySelectorAll(this.selector)) {
@@ -142,14 +157,9 @@ export class RevealClick extends BackgroundBehavior {
 
       if (USE_CURSOR_POINTER) {
         for (const elem of allElems) {
-          // cursor is inherited, only take the outermost pointer element
           if (
             !this.seenElem.has(elem) &&
-            getComputedStyle(elem).cursor === "pointer" &&
-            !(
-              elem.parentElement &&
-              getComputedStyle(elem.parentElement).cursor === "pointer"
-            ) &&
+            this.isPointer(elem) &&
             this.isCandidate(elem)
           ) {
             return elem;
@@ -159,10 +169,7 @@ export class RevealClick extends BackgroundBehavior {
 
       if (USE_CLICK_LISTENERS) {
         for (const elem of allElems) {
-          if (
-            (this._listenerElem.has(elem) || (elem as HTMLElement).onclick) &&
-            this.isCandidate(elem)
-          ) {
+          if (this.hasListener(elem) && this.isCandidate(elem)) {
             return elem;
           }
         }
@@ -210,7 +217,17 @@ export class RevealClick extends BackgroundBehavior {
         break;
       }
 
-      this.debug("Clicking on element: " + elem.outerHTML.slice(0, 100));
+      // every enabled source that matches, not just the one that found it
+      const sources = [
+        elem.matches(this.selector) && "native",
+        USE_CURSOR_POINTER && this.isPointer(elem) && "cursor-pointer",
+        USE_CLICK_LISTENERS && this.hasListener(elem) && "listener",
+      ].filter(Boolean);
+
+      this.debug(
+        `Clicking on element (${sources.join(", ")}): ` +
+          elem.outerHTML.slice(0, 100),
+      );
 
       // keep clicking while each click reveals something new
       let clicks = 1;
