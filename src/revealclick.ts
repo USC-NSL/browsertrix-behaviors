@@ -7,18 +7,35 @@ const USE_CLICK_LISTENERS = true;
 
 const LISTENER_EVENTS = ["click", "mousedown", "pointerdown"];
 
+const CLICK_EVENTS = [
+  "pointerdown",
+  "mousedown",
+  "pointerup",
+  "mouseup",
+  "click",
+];
+
 export class RevealClick extends BackgroundBehavior {
   _donePromise: Promise<void>;
   _markDone!: () => void;
   selector: string;
+  maxClicks: number;
   seenElem = new WeakSet<Element>();
   _listenerElem = new WeakSet<Element>();
+  // session-wide, so an element that cycles back to seen content stops
+  _seenResources = new Set<string>();
+  _seenText = new Set<string>();
+  _foundNewResource = false;
 
   static id = "RevealClick" as const;
 
-  constructor(selector = "button, summary, [role=button], [role=tab]") {
+  constructor(
+    selector = "button, summary, [role=button], [role=tab]",
+    maxClicks = 10,
+  ) {
     super();
     this.selector = selector;
+    this.maxClicks = maxClicks;
     this._donePromise = new Promise<void>(
       (resolve) => (this._markDone = resolve),
     );
@@ -54,6 +71,36 @@ export class RevealClick extends BackgroundBehavior {
     }
     this.seenElem.add(elem);
     return true;
+  }
+
+  addResources(entries: PerformanceEntryList) {
+    for (const entry of entries) {
+      if (!this._seenResources.has(entry.name)) {
+        this._seenResources.add(entry.name);
+        this._foundNewResource = true;
+      }
+    }
+  }
+
+  // records all visible text, true if any of it was not seen before
+  addVisibleText() {
+    let found = false;
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT,
+    );
+    while (walker.nextNode()) {
+      const text = walker.currentNode.textContent?.trim();
+      if (
+        text &&
+        !this._seenText.has(text) &&
+        walker.currentNode.parentElement?.checkVisibility()
+      ) {
+        this._seenText.add(text);
+        found = true;
+      }
+    }
+    return found;
   }
 
   nextElem(): Element | null {
@@ -108,6 +155,13 @@ export class RevealClick extends BackgroundBehavior {
 
     window.addEventListener("beforeunload", beforeUnload);
 
+    const observer = new PerformanceObserver((list) =>
+      this.addResources(list.getEntries()),
+    );
+    observer.observe({ type: "resource" });
+    this.addResources(performance.getEntriesByType("resource"));
+    this.addVisibleText();
+
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, no-constant-condition
     while (true) {
       const elem = this.nextElem();
@@ -116,34 +170,58 @@ export class RevealClick extends BackgroundBehavior {
         break;
       }
 
-      await this.processElem(elem);
+      this.debug("Clicking on element: " + elem.outerHTML.slice(0, 100));
+
+      // keep clicking while each click reveals something new
+      let clicks = 1;
+      while (
+        (await this.processElem(elem, observer)) &&
+        clicks < this.maxClicks &&
+        elem.isConnected &&
+        elem.checkVisibility()
+      ) {
+        clicks++;
+      }
+
+      this.debug(`Clicked ${clicks} times`);
     }
+
+    observer.disconnect();
 
     window.removeEventListener("beforeunload", beforeUnload);
 
     this._markDone();
   }
 
-  async processElem(elem: Element) {
-    this.debug("Clicking on element: " + elem.outerHTML.slice(0, 100));
-
+  async processElem(elem: Element, observer: PerformanceObserver) {
     const origHref = self.location.href;
     const origHistoryLen = self.history.length;
 
-    // handlers may listen for press rather than click
-    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup"]) {
-      elem.dispatchEvent(new MouseEvent(type, { bubbles: true }));
-    }
-    if (elem instanceof HTMLElement) {
-      elem.click();
-    } else {
-      elem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const rect = elem.getBoundingClientRect();
+    const init = {
+      bubbles: true,
+      cancelable: true,
+      clientX: rect.left + rect.width / 2,
+      clientY: rect.top + rect.height / 2,
+    };
+
+    this._foundNewResource = false;
+
+    for (const type of CLICK_EVENTS) {
+      elem.dispatchEvent(
+        type.startsWith("pointer")
+          ? new PointerEvent(type, { ...init, pointerType: "mouse" })
+          : new MouseEvent(type, init),
+      );
     }
 
     await sleep(250);
 
+    this.addResources(observer.takeRecords());
+    const foundNew = this.addVisibleText() || this._foundNewResource;
+
     if (self.location.href === origHref) {
-      return;
+      return foundNew;
     }
 
     this.debug("Click changed URL, restoring: " + self.location.href);
@@ -163,6 +241,8 @@ export class RevealClick extends BackgroundBehavior {
     } else {
       self.history.replaceState(self.history.state, "", origHref);
     }
+
+    return false;
   }
 
   async done() {
