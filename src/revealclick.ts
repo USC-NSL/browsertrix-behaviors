@@ -14,6 +14,9 @@ const LISTENER_EVENTS = ["click", "mousedown", "pointerdown"];
 const UNSAFE_NAME =
   /\b(buy|checkout|subscribe|unsubscribe|delete|post|submit|sign in|add to cart)\b/i;
 
+// a longer name is a card or region named by its content, not a control label
+const MAX_LABEL_WORDS = 4;
+
 // navigation api is not in the typescript dom lib yet
 type NavigateEvent = Event & {
   destination: { sameDocument: boolean; url: string };
@@ -78,18 +81,23 @@ export class RevealClick extends BackgroundBehavior {
       return "submit";
     }
     const labelIds = elem.getAttribute("aria-labelledby")?.split(/\s+/) || [];
-    const name = [
-      elem.getAttribute("aria-label"),
-      ...labelIds.map((id) => document.getElementById(id)?.textContent),
-      elem.getAttribute("title"),
-      (elem as HTMLInputElement).value,
-      elem.textContent,
-    ]
-      .join(" ")
+    // accessible name precedence, approximately
+    const name = (
+      labelIds
+        .map((id) => document.getElementById(id)?.textContent)
+        .join(" ")
+        .trim() ||
+      elem.getAttribute("aria-label") ||
+      elem.textContent?.trim() ||
+      (elem as HTMLInputElement).value ||
+      elem.getAttribute("title") ||
+      ""
+    )
       .replace(/\s+/g, " ")
       .trim();
-    const match = UNSAFE_NAME.exec(name);
-    return match ? `label "${match[0]}": ${name.slice(0, 150)}` : null;
+    const match =
+      name.split(" ").length <= MAX_LABEL_WORDS && UNSAFE_NAME.exec(name);
+    return match ? `label "${match[0]}": ${name}` : null;
   }
 
   isCandidate(elem: Element) {
