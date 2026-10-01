@@ -34,6 +34,7 @@ export class RevealClick extends BackgroundBehavior {
   maxClicks: number;
   seenElem = new WeakSet<Element>();
   _listenerElem = new WeakSet<Element>();
+  _skippedElem = new WeakSet<Element>();
   // session-wide, so an element that cycles back to seen content stops
   _seenResources = new Set<string>();
   _seenText = new Set<string>();
@@ -69,9 +70,12 @@ export class RevealClick extends BackgroundBehavior {
     }
   }
 
-  isSafe(elem: Element) {
-    if (elem.closest("form") || elem.matches("[type=submit]")) {
-      return false;
+  unsafeReason(elem: Element) {
+    if (elem.closest("form")) {
+      return "form";
+    }
+    if (elem.matches("[type=submit]")) {
+      return "submit";
     }
     const labelIds = elem.getAttribute("aria-labelledby")?.split(/\s+/) || [];
     const name = [
@@ -80,20 +84,36 @@ export class RevealClick extends BackgroundBehavior {
       elem.getAttribute("title"),
       (elem as HTMLInputElement).value,
       elem.textContent,
-    ].join(" ");
-    return !UNSAFE_NAME.test(name);
+    ]
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const match = UNSAFE_NAME.exec(name);
+    return match ? `label "${match[0]}": ${name.slice(0, 150)}` : null;
   }
 
   isCandidate(elem: Element) {
-    if (this.seenElem.has(elem) || !elem.isConnected || !this.isSafe(elem)) {
+    if (
+      this.seenElem.has(elem) ||
+      !elem.isConnected ||
+      !elem.checkVisibility()
+    ) {
       return false;
     }
     // only same-document links, following others would unload the page
     const link = elem.closest("a[href]") as HTMLAnchorElement | null;
-    if (link && link.href.split("#")[0] !== self.location.href.split("#")[0]) {
-      return false;
-    }
-    if (!elem.checkVisibility()) {
+    const reason =
+      link && link.href.split("#")[0] !== self.location.href.split("#")[0]
+        ? "path"
+        : this.unsafeReason(elem);
+    if (reason) {
+      // logged once per element, it is rechecked on every scan
+      if (!this._skippedElem.has(elem)) {
+        this._skippedElem.add(elem);
+        this.debug(
+          `Skipping element (${reason}): ` + elem.outerHTML.slice(0, 100),
+        );
+      }
       return false;
     }
     this.seenElem.add(elem);
@@ -236,7 +256,7 @@ export class RevealClick extends BackgroundBehavior {
         clicks < this.maxClicks &&
         elem.isConnected &&
         elem.checkVisibility() &&
-        this.isSafe(elem)
+        !this.unsafeReason(elem)
       ) {
         clicks++;
       }
