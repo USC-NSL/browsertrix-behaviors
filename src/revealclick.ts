@@ -10,12 +10,17 @@ const MAX_CLICKS = 10;
 
 const LISTENER_EVENTS = ["click", "mousedown", "pointerdown"];
 
-// matched against the element's own name only, not surrounding text
-const UNSAFE_NAME =
-  /\b(buy|checkout|subscribe|unsubscribe|delete|post|submit|sign in|add to cart)\b/i;
+// matched against the element's own name only, not surrounding text.
+// phrases name the action itself, so they apply at any name length
+const UNSAFE_PHRASE =
+  /\b(add\b.{0,80}?\bto\s+(cart|bag|basket|wish\s?list|favou?rites?)|buy|check\s?out|wish\s?list|favou?rites?|rate\s+this|rate|ratings?|vote|not\s+helpful|helpful|like|follow|reply|comment|report|save)\b/i;
+const UNSAFE_WORD = /\b(post|submit|delete|subscribe|unsubscribe|sign in)\b/i;
 
 // a longer name is a card or region named by its content, not a control label
 const MAX_LABEL_WORDS = 4;
+
+const CONSENT_BANNER =
+  /cookie|consent|gdpr|onetrust|cookiebot|didomi|\bcmp\b|privacy-banner/i;
 
 // reads that use POST: search queries, allowed while writes are blocked
 const ALLOWED_POST =
@@ -201,8 +206,26 @@ export class RevealClick extends BackgroundBehavior {
       .replace(/\s+/g, " ")
       .trim();
     const match =
-      name.split(" ").length <= MAX_LABEL_WORDS && UNSAFE_NAME.exec(name);
-    return match ? `label "${match[0]}": ${name}` : null;
+      UNSAFE_PHRASE.exec(name) ||
+      (name.split(" ").length <= MAX_LABEL_WORDS && UNSAFE_WORD.exec(name));
+    if (match) {
+      return `label "${match[0]}": ${name}`;
+    }
+    if (
+      /\b(accept|agree|allow|reject)\b/i.test(name) &&
+      /\b(cookies?|consent)\b/i.test(name)
+    ) {
+      return "consent";
+    }
+    for (let el: Element | null = elem; el; el = el.parentElement) {
+      const attrs = ["id", "class", "role", "aria-label"].map((a) =>
+        el?.getAttribute(a),
+      );
+      if (CONSENT_BANNER.test(attrs.join(" "))) {
+        return "consent";
+      }
+    }
+    return null;
   }
 
   isCandidate(elem: Element) {
