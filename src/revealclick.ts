@@ -13,8 +13,10 @@ const LISTENER_EVENTS = ["click", "mousedown", "pointerdown"];
 // matched against the element's own name only, not surrounding text.
 // phrases name the action itself, so they apply at any name length
 const UNSAFE_PHRASE =
-  /\b(add\b.{0,80}?\bto\s+(cart|bag|basket|wish\s?list|favou?rites?)|buy|check\s?out|wish\s?list|favou?rites?|rate\s+this|rate|ratings?|vote|not\s+helpful|helpful|like|follow|reply|comment|report|save)\b/i;
-const UNSAFE_WORD = /\b(post|submit|delete|subscribe|unsubscribe|sign in)\b/i;
+  /\b(add\b.{0,80}?\bto\s+(cart|bag|basket|wish\s?list|favou?rites?)|buy|check\s?out|wish\s?list|favou?rites?|rate\s+this|rate|ratings?|vote|not\s+helpful|helpful)\b/i;
+// generic words, common in harmless text, so only for short names
+const UNSAFE_WORD =
+  /\b(post|submit|delete|subscribe|unsubscribe|sign in|report|like|save|follow|comment|reply)\b/i;
 
 // a longer name is a card or region named by its content, not a control label
 const MAX_LABEL_WORDS = 4;
