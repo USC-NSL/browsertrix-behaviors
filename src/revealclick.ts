@@ -17,6 +17,10 @@ const UNSAFE_NAME =
 // a longer name is a card or region named by its content, not a control label
 const MAX_LABEL_WORDS = 4;
 
+// reads that use POST: search queries, allowed while writes are blocked
+const ALLOWED_POST =
+  /(^|\.)algolia(net)?\.(net|com|io)\/1\/indexes\/[^/]+\/(query|queries)$/i;
+
 // navigation api is not in the typescript dom lib yet
 type NavigateEvent = Event & {
   destination: { sameDocument: boolean; url: string };
@@ -42,6 +46,8 @@ export class RevealClick extends BackgroundBehavior {
   _seenResources = new Set<string>();
   _seenText = new Set<string>();
   _foundNewResource = false;
+  // writes are blocked only while start() runs, the page's own load is untouched
+  _blockWrites = false;
 
   static id = "RevealClick" as const;
 
@@ -70,6 +76,105 @@ export class RevealClick extends BackgroundBehavior {
         }
         addEventListener.apply(this, args);
       };
+    }
+
+    // wrapped before page scripts run, so they only ever see these versions
+    const blocked = (method: string, url: string | URL, body?: unknown) => {
+      if (
+        !this._blockWrites ||
+        ["GET", "HEAD"].includes(method.toUpperCase()) ||
+        this.isAllowedWrite(String(url), body)
+      ) {
+        return false;
+      }
+      this.debug(`Blocked ${method.toUpperCase()} request: ${String(url)}`);
+      return true;
+    };
+
+    const fetch = self.fetch;
+    self.fetch = function (this: unknown, ...args: Parameters<typeof fetch>) {
+      const [input, init] = args;
+      const request = input instanceof Request ? input : null;
+      const method = init?.method || request?.method || "GET";
+      const url = request ? request.url : String(input);
+      if (blocked(method, url, init?.body)) {
+        return Promise.reject(new TypeError("Failed to fetch"));
+      }
+      return fetch.apply(this, args);
+    };
+
+    const xhrMethod = new WeakMap<XMLHttpRequest, [string, string]>();
+    const open = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (
+      this: XMLHttpRequest,
+      method: string,
+      url: string | URL,
+      ...rest: unknown[]
+    ) {
+      xhrMethod.set(this, [method, String(url)]);
+      open.apply(this, [method, url, ...rest] as Parameters<typeof open>);
+    };
+    const send = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function (
+      this: XMLHttpRequest,
+      body?: Document | XMLHttpRequestBodyInit | null,
+    ) {
+      const [method, url] = xhrMethod.get(this) || ["GET", ""];
+      if (!blocked(method, url, body)) {
+        send.call(this, body);
+      }
+    };
+
+    const sendBeacon = navigator.sendBeacon.bind(navigator);
+    navigator.sendBeacon = (url, data) =>
+      !blocked("POST", url, data) && sendBeacon(url, data);
+
+    const submit = HTMLFormElement.prototype.submit;
+    HTMLFormElement.prototype.submit = function (this: HTMLFormElement) {
+      if (!blocked(this.method, this.action)) {
+        submit.call(this);
+      }
+    };
+    const requestSubmit = HTMLFormElement.prototype.requestSubmit;
+    HTMLFormElement.prototype.requestSubmit = function (
+      this: HTMLFormElement,
+      submitter?: HTMLElement | null,
+    ) {
+      if (!blocked(this.method, this.action)) {
+        requestSubmit.call(this, submitter);
+      }
+    };
+  }
+
+  isAllowedWrite(url: string, body: unknown) {
+    try {
+      const { host, pathname } = new URL(url, self.location.href);
+      if (ALLOWED_POST.test(host + pathname)) {
+        return true;
+      }
+    } catch (e) {
+      return false;
+    }
+    if (typeof body !== "string") {
+      return false;
+    }
+    // a graphql query reads, a mutation or subscription writes, unsure blocks
+    try {
+      const data: unknown = JSON.parse(body);
+      const ops = Array.isArray(data) ? (data as unknown[]) : [data];
+      return ops.every((op) => {
+        const query = (op as { query?: unknown } | null)?.query;
+        if (typeof query !== "string") {
+          return false;
+        }
+        const text = query.replace(/#[^\n]*/g, "").trim();
+        return (
+          (text.startsWith("{") || /^query\b/.test(text)) &&
+          !/(^|[}\s])(mutation|subscription)\b/.test(text)
+        );
+      });
+    } catch (e) {
+      return false;
     }
   }
 
@@ -217,6 +322,8 @@ export class RevealClick extends BackgroundBehavior {
 
     window.addEventListener("beforeunload", beforeUnload);
 
+    this._blockWrites = true;
+
     // cancels cross-document navigation before unload, without a dialog
     const navigate = (event: Event) => {
       const { destination } = event as NavigateEvent;
@@ -275,6 +382,8 @@ export class RevealClick extends BackgroundBehavior {
     observer.disconnect();
 
     navigation?.removeEventListener("navigate", navigate);
+
+    this._blockWrites = false;
 
     window.removeEventListener("beforeunload", beforeUnload);
 
