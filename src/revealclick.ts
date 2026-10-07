@@ -8,6 +8,10 @@ const USE_CLICK_LISTENERS = true;
 // per-element click cap, 1 disables repeat clicking
 const MAX_CLICKS = 10;
 
+// wait for the page to go quiet before the first scan, 0 disables settling
+const MAX_SETTLE_MS = 5000;
+const QUIET_MS = 1000;
+
 const LISTENER_EVENTS = ["click", "mousedown", "pointerdown"];
 
 // matched against the element's own name only, not surrounding text.
@@ -339,7 +343,38 @@ export class RevealClick extends BackgroundBehavior {
     return null;
   }
 
+  // server-rendered pages attach handlers after load, and a click that does
+  // nothing yet would mark the element done, so wait for dom and network quiet
+  async settle() {
+    const started = Date.now();
+    let last = started;
+    const mutations = new MutationObserver(() => (last = Date.now()));
+    mutations.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    });
+    const resources = new PerformanceObserver(() => (last = Date.now()));
+    resources.observe({ type: "resource" });
+
+    while (
+      Date.now() - last < QUIET_MS &&
+      Date.now() - started < MAX_SETTLE_MS
+    ) {
+      await sleep(100);
+    }
+
+    mutations.disconnect();
+    resources.disconnect();
+    this.debug(`Waited ${Date.now() - started}ms for the page to settle`);
+  }
+
   async start() {
+    if (MAX_SETTLE_MS) {
+      await this.settle();
+    }
+
     const beforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       return false;
