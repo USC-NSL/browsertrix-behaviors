@@ -362,6 +362,13 @@ export class RevealClick extends BackgroundBehavior {
 
     navigation?.addEventListener("navigate", navigate);
 
+    // a popup is a page load nobody asked for
+    const open = window.open;
+    window.open = (url?: string | URL) => {
+      this.debug("Blocked window.open: " + String(url));
+      return null;
+    };
+
     const observer = new PerformanceObserver((list) =>
       this.addResources(list.getEntries()),
     );
@@ -407,6 +414,8 @@ export class RevealClick extends BackgroundBehavior {
     observer.disconnect();
 
     navigation?.removeEventListener("navigate", navigate);
+
+    window.open = open;
 
     this._blockWrites = false;
 
