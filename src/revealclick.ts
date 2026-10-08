@@ -14,6 +14,9 @@ const QUIET_MS = 1000;
 
 const POPSTATE_TIMEOUT_MS = 2000;
 
+// stop selecting new elements after this long, the current one is finished
+const MAX_RUN_MS = 120000;
+
 const LISTENER_EVENTS = ["click", "mousedown", "pointerdown"];
 
 // matched against the element's own name only, not surrounding text.
@@ -389,6 +392,8 @@ export class RevealClick extends BackgroundBehavior {
       return;
     }
 
+    const started = Date.now();
+
     if (MAX_SETTLE_MS) {
       await this.settle();
     }
@@ -431,6 +436,11 @@ export class RevealClick extends BackgroundBehavior {
 
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, no-constant-condition
     while (true) {
+      if (Date.now() - started > MAX_RUN_MS) {
+        this.debug("Time budget reached");
+        break;
+      }
+
       const elem = this.nextElem();
 
       if (!elem) {
