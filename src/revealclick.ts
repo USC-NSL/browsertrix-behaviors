@@ -5,6 +5,10 @@ import { sleep } from "./lib/utils";
 const USE_CURSOR_POINTER = true;
 const USE_CLICK_LISTENERS = true;
 
+// also click links to another document that have a click listener (a lightbox
+// opening image.jpg): the navigation guard cancels the navigation before unload
+const CLICK_LISTENER_LINKS = false;
+
 // per-element click cap, 1 disables repeat clicking
 const MAX_CLICKS = 10;
 
@@ -255,8 +259,14 @@ export class RevealClick extends BackgroundBehavior {
     }
     // only same-document links, following others would unload the page
     const link = elem.closest("a[href]") as HTMLAnchorElement | null;
+    const otherDocument =
+      link && link.href.split("#")[0] !== self.location.href.split("#")[0];
     const reason =
-      link && link.href.split("#")[0] !== self.location.href.split("#")[0]
+      otherDocument &&
+      !(
+        CLICK_LISTENER_LINKS &&
+        (this.hasListener(link) || this.hasListener(elem))
+      )
         ? "path"
         : this.unsafeReason(elem);
     if (reason) {
