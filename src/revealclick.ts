@@ -34,6 +34,9 @@ const UNSAFE_WORD =
 // a longer name is a card or region named by its content, not a control label
 const MAX_LABEL_WORDS = 4;
 
+// links never followed, whatever the other rules allow
+const UNSAFE_LINK_PATH = /\/(cart|checkout|account|login|signin|subscribe)\b/i;
+
 const CONSENT_BANNER =
   /cookie|consent|gdpr|onetrust|cookiebot|didomi|\bcmp\b|privacy-banner/i;
 
@@ -261,12 +264,17 @@ export class RevealClick extends BackgroundBehavior {
     const link = elem.closest("a[href]") as HTMLAnchorElement | null;
     const otherDocument =
       link && link.href.split("#")[0] !== self.location.href.split("#")[0];
+    const unsafeLink =
+      link &&
+      (["mailto:", "tel:"].includes(link.protocol) ||
+        UNSAFE_LINK_PATH.test(link.pathname));
     const reason =
-      otherDocument &&
-      !(
-        CLICK_LISTENER_LINKS &&
-        (this.hasListener(link) || this.hasListener(elem))
-      )
+      unsafeLink ||
+      (otherDocument &&
+        !(
+          CLICK_LISTENER_LINKS &&
+          (this.hasListener(link) || this.hasListener(elem))
+        ))
         ? "path"
         : this.unsafeReason(elem);
     if (reason) {
