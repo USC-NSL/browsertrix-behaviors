@@ -377,6 +377,16 @@ export class RevealClick extends BackgroundBehavior {
   }
 
   async start() {
+    // a cross-origin frame is someone else's page (a consent manager, an ad):
+    // only the top frame and frames same-origin with it are clicked
+    try {
+      void self.top?.document;
+    } catch (e) {
+      this.debug("Skipping cross-origin frame: " + self.location.href);
+      this._markDone();
+      return;
+    }
+
     if (MAX_SETTLE_MS) {
       await this.settle();
     }
