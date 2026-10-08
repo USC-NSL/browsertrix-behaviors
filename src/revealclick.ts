@@ -12,6 +12,8 @@ const MAX_CLICKS = 10;
 const MAX_SETTLE_MS = 5000;
 const QUIET_MS = 1000;
 
+const POPSTATE_TIMEOUT_MS = 2000;
+
 const LISTENER_EVENTS = ["click", "mousedown", "pointerdown"];
 
 // matched against the element's own name only, not surrounding text.
@@ -509,17 +511,23 @@ export class RevealClick extends BackgroundBehavior {
     this.debug("Click changed URL, restoring: " + self.location.href);
 
     if (self.history.length === origHistoryLen + 1) {
-      await new Promise((resolve) => {
-        window.addEventListener(
-          "popstate",
-          () => {
-            resolve(null);
-          },
-          { once: true },
-        );
+      // a page can swallow the popstate, so do not wait for it forever
+      const popped = await Promise.race([
+        new Promise<boolean>((resolve) => {
+          window.addEventListener("popstate", () => resolve(true), {
+            once: true,
+          });
 
-        window.history.back();
-      });
+          window.history.back();
+        }),
+        sleep(POPSTATE_TIMEOUT_MS).then(() => false),
+      ]);
+      if (!popped) {
+        this.debug(
+          `No popstate after ${POPSTATE_TIMEOUT_MS}ms, restoring with replaceState`,
+        );
+        self.history.replaceState(self.history.state, "", origHref);
+      }
     } else {
       self.history.replaceState(self.history.state, "", origHref);
     }
