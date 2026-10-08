@@ -441,9 +441,12 @@ export class RevealClick extends BackgroundBehavior {
         break;
       }
 
+      const scanStarted = Date.now();
       const elem = this.nextElem();
+      const scanMs = Date.now() - scanStarted;
 
       if (!elem) {
+        this.debug(`No more elements (scan ${scanMs}ms)`);
         break;
       }
 
@@ -455,14 +458,21 @@ export class RevealClick extends BackgroundBehavior {
       ].filter(Boolean);
 
       this.debug(
-        `Clicking on element (${sources.join(", ")}): ` +
+        `Clicking on element (${sources.join(", ")}) [scan ${scanMs}ms]: ` +
           elem.outerHTML.slice(0, 100),
       );
 
       // keep clicking while each click reveals something new
+      const durations: number[] = [];
+      const timedClick = async () => {
+        const clickStarted = Date.now();
+        const foundNew = await this.processElem(elem, observer);
+        durations.push(Date.now() - clickStarted);
+        return foundNew;
+      };
       let clicks = 1;
       while (
-        (await this.processElem(elem, observer)) &&
+        (await timedClick()) &&
         clicks < this.maxClicks &&
         elem.isConnected &&
         elem.checkVisibility() &&
@@ -471,7 +481,7 @@ export class RevealClick extends BackgroundBehavior {
         clicks++;
       }
 
-      this.debug(`Clicked ${clicks} times`);
+      this.debug(`Clicked ${clicks} times (${durations.join(", ")}ms)`);
     }
 
     observer.disconnect();
