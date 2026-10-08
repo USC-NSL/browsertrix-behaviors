@@ -28,9 +28,12 @@ const MAX_LABEL_WORDS = 4;
 const CONSENT_BANNER =
   /cookie|consent|gdpr|onetrust|cookiebot|didomi|\bcmp\b|privacy-banner/i;
 
-// reads that use POST: search queries, allowed while writes are blocked
-const ALLOWED_POST =
-  /(^|\.)algolia(net)?\.(net|com|io)\/1\/indexes\/[^/]+\/(query|queries)$/i;
+// reads that use POST, allowed while writes are blocked: search queries, and
+// google grpc-web methods named as reads
+const ALLOWED_POST = [
+  /(^|\.)algolia(net)?\.(net|com|io)\/1\/indexes\/[^/]+\/(query|queries)$/i,
+  /(^|\.)googleapis\.com\/\$rpc\/[^/]+\/(Get|List|Search|BatchGet)\w*$/,
+];
 
 // navigation api is not in the typescript dom lib yet
 type NavigateEvent = Event & {
@@ -160,7 +163,7 @@ export class RevealClick extends BackgroundBehavior {
   isAllowedWrite(url: string, body: unknown) {
     try {
       const { host, pathname } = new URL(url, self.location.href);
-      if (ALLOWED_POST.test(host + pathname)) {
+      if (ALLOWED_POST.some((re) => re.test(host + pathname))) {
         return true;
       }
     } catch (e) {
