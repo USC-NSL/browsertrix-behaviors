@@ -176,17 +176,20 @@ export class RevealClick extends BackgroundBehavior {
     try {
       const data: unknown = JSON.parse(body);
       const ops = Array.isArray(data) ? (data as unknown[]) : [data];
-      return ops.every((op) => {
-        const query = (op as { query?: unknown } | null)?.query;
-        if (typeof query !== "string") {
-          return false;
-        }
-        const text = query.replace(/#[^\n]*/g, "").trim();
-        return (
-          (text.startsWith("{") || /^query\b/.test(text)) &&
-          !/(^|[}\s])(mutation|subscription)\b/.test(text)
-        );
-      });
+      return (
+        ops.length > 0 &&
+        ops.every((op) => {
+          const query = (op as { query?: unknown } | null)?.query;
+          if (typeof query !== "string") {
+            return false;
+          }
+          const text = query.replace(/#[^\n]*/g, "").trim();
+          return (
+            (text.startsWith("{") || /^query\b/.test(text)) &&
+            !/(^|[}\s])(mutation|subscription)\b/.test(text)
+          );
+        })
+      );
     } catch (e) {
       return false;
     }
