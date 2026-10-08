@@ -548,7 +548,15 @@ export class RevealClick extends BackgroundBehavior {
 
     this.debug("Click changed URL, restoring: " + self.location.href);
 
-    if (self.history.length === origHistoryLen + 1) {
+    // frames share one session history, so back() in a frame, or for a hash
+    // change, can undo another frame's entry: only the top frame goes back
+    const hashOnly =
+      self.location.href.split("#")[0] === origHref.split("#")[0];
+    if (
+      !hashOnly &&
+      self.top === self &&
+      self.history.length === origHistoryLen + 1
+    ) {
       // a page can swallow the popstate, so do not wait for it forever
       const popped = await Promise.race([
         new Promise<boolean>((resolve) => {
