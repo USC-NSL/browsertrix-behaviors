@@ -558,6 +558,19 @@ export class RevealClick extends BackgroundBehavior {
       return foundNew;
     }
 
+    // a query or fragment is in-page state (?page=2, a hash tab, an anchor):
+    // undoing it can make the router redraw what the click revealed
+    const { origin, pathname } = new URL(origHref);
+    if (
+      self.location.origin === origin &&
+      self.location.pathname === pathname
+    ) {
+      this.debug(
+        "Click changed query or fragment, keeping: " + self.location.href,
+      );
+      return foundNew;
+    }
+
     this.debug("Click changed URL, restoring: " + self.location.href);
 
     // frames share one session history, so a frame never traverses it
