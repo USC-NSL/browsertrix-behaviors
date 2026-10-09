@@ -5,9 +5,11 @@ import { sleep } from "./lib/utils";
 const USE_CURSOR_POINTER = true;
 const USE_CLICK_LISTENERS = true;
 
-// also click links to another document that have a click listener (a lightbox
-// opening image.jpg): the navigation guard cancels the navigation before unload
+// also click links to an image or video that have a click listener (a lightbox
+// opening image.jpg): the navigation guard cancels the navigation before unload.
+// other links with a listener are mostly router links, which change the route
 const CLICK_LISTENER_LINKS = false;
+const MEDIA_PATH = /\.(jpe?g|png|gif|webp|avif|svg|bmp|mp4|webm|mov|m4v|ogv)$/i;
 
 // per-element click cap, 1 disables repeat clicking
 const MAX_CLICKS = 10;
@@ -279,6 +281,7 @@ export class RevealClick extends BackgroundBehavior {
       (otherDocument &&
         !(
           CLICK_LISTENER_LINKS &&
+          MEDIA_PATH.test(link.pathname) &&
           (this.hasListener(link) || this.hasListener(elem))
         ))
         ? "path"
