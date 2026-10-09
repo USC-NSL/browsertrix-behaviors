@@ -16,7 +16,7 @@ const MAX_CLICKS = 10;
 const MAX_SETTLE_MS = 5000;
 const QUIET_MS = 1000;
 
-const POPSTATE_TIMEOUT_MS = 2000;
+const TRAVERSE_TIMEOUT_MS = 2000;
 
 // stop selecting new elements after this long, the current one is finished
 const MAX_RUN_MS = 120000;
@@ -51,6 +51,10 @@ const ALLOWED_POST = [
 type NavigateEvent = Event & {
   destination: { sameDocument: boolean; url: string };
 };
+type Navigation = EventTarget & {
+  currentEntry: { key: string } | null;
+  traverseTo: (key: string) => { finished: Promise<unknown> };
+};
 
 const CLICK_EVENTS = [
   "pointerdown",
@@ -74,6 +78,8 @@ export class RevealClick extends BackgroundBehavior {
   _foundNewResource = false;
   // writes are blocked only while start() runs, the page's own load is untouched
   _blockWrites = false;
+  // a click replaced the route: the page's router no longer matches its url
+  _routeReplaced = false;
 
   static id = "RevealClick" as const;
 
@@ -433,7 +439,7 @@ export class RevealClick extends BackgroundBehavior {
         event.preventDefault();
       }
     };
-    const navigation = (self as unknown as { navigation?: EventTarget })
+    const navigation = (self as unknown as { navigation?: Navigation })
       .navigation;
 
     navigation?.addEventListener("navigate", navigate);
@@ -452,8 +458,7 @@ export class RevealClick extends BackgroundBehavior {
     this.addResources(performance.getEntriesByType("resource"));
     this.addVisibleText();
 
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, no-constant-condition
-    while (true) {
+    while (!this._routeReplaced) {
       if (Date.now() - started > MAX_RUN_MS) {
         this.debug("Time budget reached");
         break;
@@ -491,6 +496,7 @@ export class RevealClick extends BackgroundBehavior {
       let clicks = 1;
       while (
         (await timedClick()) &&
+        !this._routeReplaced &&
         clicks < this.maxClicks &&
         elem.isConnected &&
         elem.checkVisibility() &&
@@ -516,8 +522,11 @@ export class RevealClick extends BackgroundBehavior {
   }
 
   async processElem(elem: Element, observer: PerformanceObserver) {
+    const navigation = (self as unknown as { navigation?: Navigation })
+      .navigation;
     const origHref = self.location.href;
-    const origHistoryLen = self.history.length;
+    const origState: unknown = self.history.state;
+    const origKey = navigation?.currentEntry?.key;
 
     const rect = elem.getBoundingClientRect();
     const init = {
@@ -548,34 +557,35 @@ export class RevealClick extends BackgroundBehavior {
 
     this.debug("Click changed URL, restoring: " + self.location.href);
 
-    // frames share one session history, so back() in a frame, or for a hash
-    // change, can undo another frame's entry: only the top frame goes back
-    const hashOnly =
-      self.location.href.split("#")[0] === origHref.split("#")[0];
-    if (
-      !hashOnly &&
-      self.top === self &&
-      self.history.length === origHistoryLen + 1
-    ) {
-      // a page can swallow the popstate, so do not wait for it forever
-      const popped = await Promise.race([
+    // frames share one session history, so a frame never traverses it
+    if (self.top !== self) {
+      self.history.replaceState(origState, "", origHref);
+      return false;
+    }
+
+    // a push keeps the original entry, so traverse back to exactly that one
+    // and the page's router follows the popstate. a replace overwrote it
+    let restored = false;
+    if (navigation && origKey && navigation.currentEntry?.key !== origKey) {
+      // finished resolves before the popstate, so wait for the popstate
+      restored = await Promise.race([
         new Promise<boolean>((resolve) => {
           window.addEventListener("popstate", () => resolve(true), {
             once: true,
           });
-
-          window.history.back();
+          navigation.traverseTo(origKey).finished.catch(() => resolve(false));
         }),
-        sleep(POPSTATE_TIMEOUT_MS).then(() => false),
+        sleep(TRAVERSE_TIMEOUT_MS).then(() => false),
       ]);
-      if (!popped) {
-        this.debug(
-          `No popstate after ${POPSTATE_TIMEOUT_MS}ms, restoring with replaceState`,
-        );
-        self.history.replaceState(self.history.state, "", origHref);
+      if (!restored) {
+        this.debug(`No traversal within ${TRAVERSE_TIMEOUT_MS}ms`);
       }
-    } else {
-      self.history.replaceState(self.history.state, "", origHref);
+    }
+
+    if (!restored) {
+      self.history.replaceState(origState, "", origHref);
+      this.debug("Route replaced, stopping");
+      this._routeReplaced = true;
     }
 
     return false;
