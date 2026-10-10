@@ -216,6 +216,11 @@ export class RevealClick extends BackgroundBehavior {
   }
 
   unsafeReason(elem: Element) {
+    // a disabled control can still have a live handler (a "previous" button on
+    // page 1 that loads page 0): a person would not press it
+    if (elem.matches('[disabled], [aria-disabled="true"]')) {
+      return "disabled";
+    }
     if (elem.closest("form")) {
       return "form";
     }
