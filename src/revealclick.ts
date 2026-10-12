@@ -18,6 +18,12 @@ const MAX_CLICKS = 10;
 const MAX_SETTLE_MS = 5000;
 const QUIET_MS = 1000;
 
+// after a click: at least MIN_WAIT_MS, then while a fetch/XHR the click started
+// is in flight or the DOM changed within WAIT_QUIET_MS, up to MAX_WAIT_MS
+const MIN_WAIT_MS = 250;
+const WAIT_QUIET_MS = 250;
+const MAX_WAIT_MS = 2500;
+
 const TRAVERSE_TIMEOUT_MS = 2000;
 
 // stop selecting new elements after this long, the current one is finished
@@ -94,6 +100,9 @@ export class RevealClick extends BackgroundBehavior {
   _foundNewResource = false;
   // writes are blocked only while start() runs, the page's own load is untouched
   _blockWrites = false;
+  // fetch/XHR requests in flight, by start time, and the last DOM change
+  _inFlight = new Map<object, number>();
+  _lastMutation = 0;
   // a click replaced the route: the page's router no longer matches its url
   _routeReplaced = false;
 
@@ -139,6 +148,7 @@ export class RevealClick extends BackgroundBehavior {
       return true;
     };
 
+    const inFlight = this._inFlight;
     const fetch = self.fetch;
     self.fetch = function (this: unknown, ...args: Parameters<typeof fetch>) {
       const [input, init] = args;
@@ -148,7 +158,9 @@ export class RevealClick extends BackgroundBehavior {
       if (blocked(method, url, init?.body)) {
         return Promise.reject(new TypeError("Failed to fetch"));
       }
-      return fetch.apply(this, args);
+      const token = {};
+      inFlight.set(token, Date.now());
+      return fetch.apply(this, args).finally(() => inFlight.delete(token));
     };
 
     const xhrMethod = new WeakMap<XMLHttpRequest, [string, string]>();
@@ -169,6 +181,10 @@ export class RevealClick extends BackgroundBehavior {
     ) {
       const [method, url] = xhrMethod.get(this) || ["GET", ""];
       if (!blocked(method, url, body)) {
+        inFlight.set(this, Date.now());
+        this.addEventListener("loadend", () => inFlight.delete(this), {
+          once: true,
+        });
         send.call(this, body);
       }
     };
@@ -521,6 +537,16 @@ export class RevealClick extends BackgroundBehavior {
       return null;
     };
 
+    const mutations = new MutationObserver(
+      () => (this._lastMutation = Date.now()),
+    );
+    mutations.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    });
+
     const observer = new PerformanceObserver((list) =>
       this.addResources(list.getEntries()),
     );
@@ -564,9 +590,10 @@ export class RevealClick extends BackgroundBehavior {
       };
       this._signatures.set(signature, state);
       const durations: number[] = [];
+      const waits: number[] = [];
       const timedClick = async () => {
         const clickStarted = Date.now();
-        const foundNew = await this.processElem(elem, observer);
+        const foundNew = await this.processElem(elem, observer, waits);
         durations.push(Date.now() - clickStarted);
         state.clicks++;
         state.novel = foundNew;
@@ -584,10 +611,14 @@ export class RevealClick extends BackgroundBehavior {
         clicks++;
       }
 
-      this.debug(`Clicked ${clicks} times (${durations.join(", ")}ms)`);
+      this.debug(
+        `Clicked ${clicks} times (${durations.join(", ")}ms) ` +
+          `[waited ${waits.join(", ")}ms]`,
+      );
     }
 
     observer.disconnect();
+    mutations.disconnect();
 
     navigation?.removeEventListener("navigate", navigate);
 
@@ -600,7 +631,24 @@ export class RevealClick extends BackgroundBehavior {
     this._markDone();
   }
 
-  async processElem(elem: Element, observer: PerformanceObserver) {
+  // what a click set off: the fetches it started, and the DOM changes they bring
+  async waitForQuiet(clicked: number) {
+    await sleep(MIN_WAIT_MS);
+    while (Date.now() - clicked < MAX_WAIT_MS) {
+      const busy = [...this._inFlight.values()].some((t) => t >= clicked);
+      if (!busy && Date.now() - this._lastMutation >= WAIT_QUIET_MS) {
+        break;
+      }
+      await sleep(50);
+    }
+    return Date.now() - clicked;
+  }
+
+  async processElem(
+    elem: Element,
+    observer: PerformanceObserver,
+    waits: number[],
+  ) {
     const navigation = (self as unknown as { navigation?: Navigation })
       .navigation;
     const origHref = self.location.href;
@@ -617,6 +665,7 @@ export class RevealClick extends BackgroundBehavior {
 
     this._foundNewResource = false;
 
+    const clicked = Date.now();
     for (const type of CLICK_EVENTS) {
       elem.dispatchEvent(
         type.startsWith("pointer")
@@ -625,7 +674,7 @@ export class RevealClick extends BackgroundBehavior {
       );
     }
 
-    await sleep(250);
+    waits.push(await this.waitForQuiet(clicked));
 
     this.addResources(observer.takeRecords());
     const foundNew = this.addVisibleText() || this._foundNewResource;
