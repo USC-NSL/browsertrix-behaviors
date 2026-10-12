@@ -313,6 +313,11 @@ export class RevealClick extends BackgroundBehavior {
     ) {
       return false;
     }
+    // nothing a person could click (an empty portal div a framework keeps adding)
+    const { width, height } = elem.getBoundingClientRect();
+    if (!width || !height) {
+      return false;
+    }
     // only same-document links, following others would unload the page
     const link = elem.closest("a[href]") as HTMLAnchorElement | null;
     const otherDocument =
