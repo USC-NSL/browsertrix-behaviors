@@ -39,6 +39,11 @@ const MAX_LABEL_WORDS = 4;
 // links never followed, whatever the other rules allow
 const UNSAFE_LINK_PATH = /\/(cart|checkout|account|login|signin|subscribe)\b/i;
 
+// stream segments and manifests keep arriving while a player runs, they say
+// nothing about whether a click revealed something
+const MEDIA_SEGMENT =
+  /\.(m3u8|mpd|ts|m4s|m4a|m4v|mp4|webm|aac|vtt|cmfv|cmfa)$/i;
+
 // an element's signature: ids that look generated per render are not anchors,
 // and only attributes that stay the same across renders are compared
 const GENERATED_ID =
@@ -364,7 +369,9 @@ export class RevealClick extends BackgroundBehavior {
     for (const entry of entries) {
       if (!this._seenResources.has(entry.name)) {
         this._seenResources.add(entry.name);
-        this._foundNewResource = true;
+        if (!MEDIA_SEGMENT.test(entry.name.split(/[?#]/)[0])) {
+          this._foundNewResource = true;
+        }
       }
     }
   }
