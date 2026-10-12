@@ -39,6 +39,12 @@ const MAX_LABEL_WORDS = 4;
 // links never followed, whatever the other rules allow
 const UNSAFE_LINK_PATH = /\/(cart|checkout|account|login|signin|subscribe)\b/i;
 
+// an element's signature: ids that look generated per render are not anchors,
+// and only attributes that stay the same across renders are compared
+const GENERATED_ID =
+  /\d{3,}|:|[0-9a-f]{8}|^(ember|react|rc|mui|radix|headlessui|ng)[-_]/i;
+const STABLE_ATTRS = ["type", "href", "name", "title", "data-testid"];
+
 const CONSENT_BANNER =
   /cookie|consent|gdpr|onetrust|cookiebot|didomi|\bcmp\b|privacy-banner/i;
 
@@ -77,6 +83,9 @@ export class RevealClick extends BackgroundBehavior {
   // session-wide, so an element that cycles back to seen content stops
   _seenResources = new Set<string>();
   _seenText = new Set<string>();
+  // per signature, so a re-rendered control is known again: clicks so far, and
+  // whether the last click revealed something
+  _signatures = new Map<string, { clicks: number; novel: boolean }>();
   _foundNewResource = false;
   // writes are blocked only while start() runs, the page's own load is untouched
   _blockWrites = false;
@@ -215,21 +224,10 @@ export class RevealClick extends BackgroundBehavior {
     }
   }
 
-  unsafeReason(elem: Element) {
-    // a disabled control can still have a live handler (a "previous" button on
-    // page 1 that loads page 0): a person would not press it
-    if (elem.matches('[disabled], [aria-disabled="true"]')) {
-      return "disabled";
-    }
-    if (elem.closest("form")) {
-      return "form";
-    }
-    if (elem.matches("[type=submit]")) {
-      return "submit";
-    }
+  accessibleName(elem: Element) {
     const labelIds = elem.getAttribute("aria-labelledby")?.split(/\s+/) || [];
     // accessible name precedence, approximately
-    const name = (
+    return (
       labelIds
         .map((id) => document.getElementById(id)?.textContent)
         .join(" ")
@@ -242,6 +240,48 @@ export class RevealClick extends BackgroundBehavior {
     )
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  // the same control after a re-render: its path from the nearest ancestor with
+  // a stable id, as tag:nth-of-type steps, and its role, name and attributes
+  signature(elem: Element) {
+    const path: string[] = [];
+    for (
+      let el: Element | null = elem;
+      el && el !== document.body;
+      el = el.parentElement
+    ) {
+      if (el.id && !GENERATED_ID.test(el.id)) {
+        path.unshift("#" + el.id);
+        break;
+      }
+      const tag = el.tagName;
+      const same = el.parentElement
+        ? [...el.parentElement.children].filter((c) => c.tagName === tag)
+        : [el];
+      path.unshift(`${tag.toLowerCase()}:${same.indexOf(el) + 1}`);
+    }
+    return [
+      path.join(">"),
+      elem.getAttribute("role") || "",
+      this.accessibleName(elem).slice(0, 100),
+      ...STABLE_ATTRS.map((a) => elem.getAttribute(a) || ""),
+    ].join("|");
+  }
+
+  unsafeReason(elem: Element) {
+    // a disabled control can still have a live handler (a "previous" button on
+    // page 1 that loads page 0): a person would not press it
+    if (elem.matches('[disabled], [aria-disabled="true"]')) {
+      return "disabled";
+    }
+    if (elem.closest("form")) {
+      return "form";
+    }
+    if (elem.matches("[type=submit]")) {
+      return "submit";
+    }
+    const name = this.accessibleName(elem);
     const match =
       UNSAFE_PHRASE.exec(name) ||
       (name.split(" ").length <= MAX_LABEL_WORDS && UNSAFE_WORD.exec(name));
@@ -290,7 +330,7 @@ export class RevealClick extends BackgroundBehavior {
           (this.hasListener(link) || this.hasListener(elem))
         ))
         ? "path"
-        : this.unsafeReason(elem);
+        : this.unsafeReason(elem) || this.seenReason(elem);
     if (reason) {
       // logged once per element, it is rechecked on every scan
       if (!this._skippedElem.has(elem)) {
@@ -303,6 +343,16 @@ export class RevealClick extends BackgroundBehavior {
     }
     this.seenElem.add(elem);
     return true;
+  }
+
+  // a control seen before under another node is clicked again only while it is
+  // still revealing (a load-more rebuilt after each batch), up to the click cap
+  seenReason(elem: Element) {
+    const seen = this._signatures.get(this.signature(elem));
+    if (seen && !(seen.novel && seen.clicks < this.maxClicks)) {
+      return "seen";
+    }
+    return null;
   }
 
   addResources(entries: PerformanceEntryList) {
@@ -493,19 +543,28 @@ export class RevealClick extends BackgroundBehavior {
           elem.outerHTML.slice(0, 100),
       );
 
-      // keep clicking while each click reveals something new
+      // keep clicking while each click reveals something new, the cap counts
+      // every click on this signature, across re-renders
+      const signature = this.signature(elem);
+      const state = this._signatures.get(signature) || {
+        clicks: 0,
+        novel: false,
+      };
+      this._signatures.set(signature, state);
       const durations: number[] = [];
       const timedClick = async () => {
         const clickStarted = Date.now();
         const foundNew = await this.processElem(elem, observer);
         durations.push(Date.now() - clickStarted);
+        state.clicks++;
+        state.novel = foundNew;
         return foundNew;
       };
       let clicks = 1;
       while (
         (await timedClick()) &&
         !this._routeReplaced &&
-        clicks < this.maxClicks &&
+        state.clicks < this.maxClicks &&
         elem.isConnected &&
         elem.checkVisibility() &&
         !this.unsafeReason(elem)
