@@ -216,7 +216,7 @@ export class RevealClick extends BackgroundBehavior {
       if (ALLOWED_POST.some((re) => re.test(host + pathname))) {
         return true;
       }
-    } catch (e) {
+    } catch (_) {
       return false;
     }
     if (typeof body !== "string") {
@@ -240,7 +240,7 @@ export class RevealClick extends BackgroundBehavior {
           );
         })
       );
-    } catch (e) {
+    } catch (_) {
       return false;
     }
   }
@@ -496,7 +496,7 @@ export class RevealClick extends BackgroundBehavior {
     // only the top frame and frames same-origin with it are clicked
     try {
       void self.top?.document;
-    } catch (e) {
+    } catch (_) {
       this.debug("Skipping cross-origin frame: " + self.location.href);
       this._markDone();
       return;
