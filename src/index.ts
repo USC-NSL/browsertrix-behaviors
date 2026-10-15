@@ -54,9 +54,38 @@ const DEFAULT_OPTS: BehaviorManagerOpts = {
 
 const DEFAULT_CLICK_SELECTOR = "a";
 
-// eval-only: what autoclick runs
+// eval-only: what autoclick runs, one after the other
 const EVAL_REVEALCLICK = true;
 const EVAL_AUTOHOVER = true;
+
+// eval-only: runs each behavior to completion before starting the next, so one
+// never counts what another revealed. all are constructed up front, so their
+// wrappers are in place before page scripts run
+class EvalSequence {
+  static id = "EvalSequence" as const;
+  steps: (AutoHover | RevealClick)[];
+  _done: Promise<void> = Promise.resolve();
+
+  constructor(steps: (AutoHover | RevealClick)[]) {
+    this.steps = steps;
+  }
+
+  start() {
+    this._done = (async () => {
+      for (const step of this.steps) {
+        const id = (step.constructor as typeof AutoHover | typeof RevealClick)
+          .id;
+        void behaviorLog("Starting behavior: " + id, "debug");
+        void step.start();
+        await step.done();
+      }
+    })();
+  }
+
+  async done() {
+    return this._done;
+  }
+}
 
 const DEFAULT_LINK_SELECTOR = "a[href]";
 const DEFAULT_LINK_EXTRACT = "href";
@@ -66,6 +95,7 @@ type BehaviorClass =
   | typeof AutoClick
   | typeof RevealClick
   | typeof AutoHover
+  | typeof EvalSequence
   | typeof AutoScroll
   | typeof Autoplay
   | typeof AutoFetcher
@@ -151,15 +181,17 @@ export class BehaviorManager {
     }
 
     if (opts.autoclick) {
-      // eval-only: run RevealClick and AutoHover in place of AutoClick
-      if (EVAL_REVEALCLICK) {
-        void behaviorLog("Using RevealClick");
-        this.behaviors.push(new RevealClick());
-      }
+      // eval-only: AutoHover to completion, then RevealClick, in place of AutoClick
+      const steps: (AutoHover | RevealClick)[] = [];
       if (EVAL_AUTOHOVER) {
         void behaviorLog("Using AutoHover");
-        this.behaviors.push(new AutoHover());
+        steps.push(new AutoHover());
       }
+      if (EVAL_REVEALCLICK) {
+        void behaviorLog("Using RevealClick");
+        steps.push(new RevealClick());
+      }
+      this.behaviors.push(new EvalSequence(steps));
     }
 
     if (customBehaviors) {
