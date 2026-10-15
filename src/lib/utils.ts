@@ -288,6 +288,41 @@ export async function openWindow(
   return window.open(url);
 }
 
+// window.open replaced by a stub that opens nothing, shared by behaviors that run
+// at the same time: the native function comes back when the last one releases it.
+// a page that declares a global function open() has replaced window.open with
+// its own function and calls it by that name, so that one is left alone
+let openBlocks = 0;
+let nativeOpen: typeof window.open | null = null;
+
+export function blockWindowOpen(log: (msg: string) => void): () => void {
+  if (!openBlocks) {
+    if (
+      !Function.prototype.toString.call(window.open).includes("[native code]")
+    ) {
+      log("window.open overridden by page, not stubbed");
+      return () => {};
+    }
+    nativeOpen = window.open;
+    window.open = (url?: string | URL) => {
+      log("Blocked window.open: " + String(url));
+      return null;
+    };
+  }
+  openBlocks++;
+  let released = false;
+  return () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    if (!--openBlocks && nativeOpen) {
+      window.open = nativeOpen;
+      nativeOpen = null;
+    }
+  };
+}
+
 export function _setLogFunc(
   func: ((message: string, level: string) => void) | null,
 ) {

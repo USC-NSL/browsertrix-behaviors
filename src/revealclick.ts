@@ -1,5 +1,5 @@
 import { BackgroundBehavior } from "./lib/behavior";
-import { sleep } from "./lib/utils";
+import { blockWindowOpen, sleep } from "./lib/utils";
 
 // build-time variant switches for candidate sources beyond native controls
 const USE_CURSOR_POINTER = true;
@@ -531,11 +531,7 @@ export class RevealClick extends BackgroundBehavior {
     navigation?.addEventListener("navigate", navigate);
 
     // a popup is a page load nobody asked for
-    const open = window.open;
-    window.open = (url?: string | URL) => {
-      this.debug("Blocked window.open: " + String(url));
-      return null;
-    };
+    const releaseOpen = blockWindowOpen((msg) => this.debug(msg));
 
     const mutations = new MutationObserver(
       () => (this._lastMutation = Date.now()),
@@ -622,7 +618,7 @@ export class RevealClick extends BackgroundBehavior {
 
     navigation?.removeEventListener("navigate", navigate);
 
-    window.open = open;
+    releaseOpen();
 
     this._blockWrites = false;
 
