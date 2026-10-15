@@ -3,6 +3,7 @@ import { Autoplay } from "./autoplay";
 import { AutoScroll } from "./autoscroll";
 import { AutoClick } from "./autoclick";
 import { RevealClick } from "./revealclick";
+import { AutoHover } from "./autohover";
 import {
   awaitLoad,
   sleep,
@@ -53,6 +54,10 @@ const DEFAULT_OPTS: BehaviorManagerOpts = {
 
 const DEFAULT_CLICK_SELECTOR = "a";
 
+// eval-only: what autoclick runs
+const EVAL_REVEALCLICK = true;
+const EVAL_AUTOHOVER = true;
+
 const DEFAULT_LINK_SELECTOR = "a[href]";
 const DEFAULT_LINK_EXTRACT = "href";
 
@@ -60,6 +65,7 @@ type BehaviorClass =
   | (typeof siteBehaviors)[number]
   | typeof AutoClick
   | typeof RevealClick
+  | typeof AutoHover
   | typeof AutoScroll
   | typeof Autoplay
   | typeof AutoFetcher
@@ -145,9 +151,15 @@ export class BehaviorManager {
     }
 
     if (opts.autoclick) {
-      // eval-only: run RevealClick in place of AutoClick
-      void behaviorLog("Using RevealClick");
-      this.behaviors.push(new RevealClick());
+      // eval-only: run RevealClick and AutoHover in place of AutoClick
+      if (EVAL_REVEALCLICK) {
+        void behaviorLog("Using RevealClick");
+        this.behaviors.push(new RevealClick());
+      }
+      if (EVAL_AUTOHOVER) {
+        void behaviorLog("Using AutoHover");
+        this.behaviors.push(new AutoHover());
+      }
     }
 
     if (customBehaviors) {
