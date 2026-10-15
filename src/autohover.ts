@@ -19,6 +19,11 @@ const LISTENER_EVENTS = [
 ];
 const NAV_MENU_SELECTOR = "nav li, [aria-haspopup], [aria-expanded]";
 
+// framework app roots: a hover listener there is delegation, not a hover target
+const ROOT_IDS = /^(root|app|__next|__nuxt|___gatsby)$/;
+// an element covering more than this share of the viewport in both dimensions
+const MAX_VIEWPORT_SHARE = 0.8;
+
 // a :hover rule counts when it shows or hides something, or loads an image
 const CSS_HOVER_PROPS = ["display", "visibility", "opacity"];
 
@@ -191,9 +196,37 @@ export class AutoHover extends BackgroundBehavior {
     return out;
   }
 
+  // a page root, or an element covering most of the viewport: the pointer lands
+  // on whatever is at its centre, and a real move there scrolls the page
+  isPageSized(elem: Element) {
+    const { body } = document;
+    if (elem === document.documentElement || elem === body) {
+      return true;
+    }
+    if (elem.parentElement === body) {
+      const content = [...body.children].filter(
+        (el) =>
+          !["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "LINK"].includes(
+            el.tagName,
+          ),
+      );
+      if (ROOT_IDS.test(elem.id) || content.length === 1) {
+        return true;
+      }
+    }
+    const { width, height } = elem.getBoundingClientRect();
+    return (
+      width > MAX_VIEWPORT_SHARE * window.innerWidth &&
+      height > MAX_VIEWPORT_SHARE * window.innerHeight
+    );
+  }
+
   skipReason(elem: Element) {
     if (this.linksAway(elem)) {
       return "path";
+    }
+    if (this.isPageSized(elem)) {
+      return "page-sized";
     }
     const seen = this._signatures.get(this.rc.signature(elem));
     if (seen && !(seen.novel && seen.hovers < MAX_HOVERS)) {
