@@ -6,6 +6,11 @@ import { RevealClick } from "./revealclick";
 // :hover applies; synthetic events otherwise, which reach handlers only
 const USE_REAL_HOVER = true;
 
+// eval-only control: real mode's scroll into view, pause and wait for every
+// candidate, without moving the pointer, so a hover's recall can be told apart
+// from what scrolling to its target loads
+const SCROLL_ONLY = false;
+
 // build-time switches for candidate sources
 const USE_HOVER_LISTENERS = true;
 const USE_NAV_MENUS = true;
@@ -364,6 +369,10 @@ export class AutoHover extends BackgroundBehavior {
       if (reason) {
         return { arrived: 0, path: `skipped: ${reason}` };
       }
+      if (SCROLL_ONLY) {
+        await sleep(FLOW_PAUSE_MS);
+        return { arrived: Date.now() - FLOW_PAUSE_MS, path: "scroll-only" };
+      }
       if (await this.realHover(elem)) {
         return { arrived: Date.now() - FLOW_PAUSE_MS, path: "real" };
       }
@@ -405,7 +414,9 @@ export class AutoHover extends BackgroundBehavior {
     this._signatures.set(signature, state);
 
     this.stats.hovers++;
-    this.stats[path === "real" ? "real" : "synthetic"]++;
+    if (path !== "scroll-only") {
+      this.stats[path === "real" ? "real" : "synthetic"]++;
+    }
     this.debug(
       `Hovered (${path}) in ${Date.now() - hoverStarted}ms ` +
         `[waited ${waited}ms]: ${novel ? "new content" : "nothing new"}`,
